@@ -1,10 +1,12 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Result, Context, bail};
 use clap::Parser;
 use fastcgi_client::Request;
 use fastcgi_client::{Params, Client};
+use headers::parse_headers;
 use std::borrow::Cow;
 use std::env;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::process::ExitCode;
 use tokio::{
     fs::OpenOptions,
@@ -12,6 +14,8 @@ use tokio::{
     net::{TcpStream, UnixStream}
 };
 use url::{Host, Url};
+
+mod headers;
 
 const CGI_META_VARS: &[&str] = &[
     "AUTH_TYPE",
@@ -79,6 +83,25 @@ struct Cli {
     #[arg(short = 'E', long = "full-env", conflicts_with = "env_clear")]
     env_full: bool,
 
+    /// Dump response headers to file
+    ///
+    /// This option requires the headers to be parsed, in order to split the
+    /// headers from the body.
+    /// When dealing with malformed headers, refer to -i, --include.
+    #[arg(short = 'D', long = "dump-header", value_name = "FILE")]
+    response_headers_dump_file: Option<PathBuf>,
+
+    /// Include response headers in output
+    ///
+    /// Unless required by other options, header parsing is disabled.
+    /// Thus, this option allows you to dump malformed headers.
+    #[arg(short = 'i', long = "include")]
+    response_headers_include: bool,
+
+    /// Fail and ignore the response body if the 'Status' header contains a value >= 400
+    #[arg(short = 'f', long = "fail")]
+    response_status_fail_on_gte_400: bool,
+
     /// Write ouput files to DIR
     #[arg(long = "output-dir", value_name = "DIR")]
     output_directory: Option<PathBuf>,
@@ -133,6 +156,12 @@ impl Cli {
                 self.output_file_name.clone()
             }
         )
+    }
+
+    fn need_parse_header(&self) -> bool {
+        self.response_status_fail_on_gte_400
+            || !self.response_headers_include
+            || self.response_headers_dump_file.is_some()
     }
 }
 
@@ -254,37 +283,81 @@ async fn execute(cli: &Cli) -> Result<()> {
             client.execute_once(Request::new(params, input_stream)).await
         }?;
     
-    if let Some(data) = response.stdout {
-        let mut out_stream = Box::<dyn io::AsyncWrite>::into_pin(
-            if let Some(file_name) = cli.real_output_file_name()? {
-                Box::new(OpenOptions::new()
-                    .write(true)
-                    .open(cli.resolve_output_path(file_name))
-                    .await?
-                )    
-            } else {
-                Box::new(io::stdout())
-            }
-        );
-
-        io::copy(&mut data.as_slice(), &mut out_stream).await?;
-    }
+    if let Some(data) = response.stdout.as_ref().map(Vec::as_slice) {
+        handle_response_stdout(&cli, data).await?; // TODO: gently handle errors
+    };
 
     if let Some(data) = response.stderr {
-        let mut err_stream = Box::<dyn io::AsyncWrite>::into_pin(
-            if let Some(file_name) = cli.stderr_file_name.as_ref() {
-                Box::new(OpenOptions::new()
-                    .write(true)
-                    .open(cli.resolve_output_path(file_name))
-                    .await?
-                )
-            } else {
-                Box::new(io::stderr())
-            }
-        );
+        handle_response_stderr(&cli, data).await?; // TODO: gently handle errors
+    };
 
-        io::copy(&mut data.as_slice(), &mut err_stream).await?;
-    }
+    Ok(())
+}
+
+async fn open_output_file(cli: &Cli, file_name: impl AsRef<Path>) -> io::Result<Pin<Box<dyn io::AsyncWrite>>> {
+    Ok(Box::pin(
+        OpenOptions::new()
+            .write(true)
+            .open(cli.resolve_output_path(file_name))
+            .await?
+    ))
+}
+
+async fn handle_response_stdout(cli: &Cli, data: &[u8]) -> Result<()> {
+    let mut out = if cli.need_parse_header() {
+        let (body, headers) = parse_headers(data)
+            .map_err(|_e| anyhow!("Malformed response header."))?;
+
+        if cli.response_status_fail_on_gte_400 {
+            let status = headers
+                .get("status")
+                .map_or_else(|| { Ok(200u16) }, |s| {
+                    let first_part = s.split_ascii_whitespace().next().unwrap_or("");
+                    str::parse::<u16>(first_part)
+                })
+                .context("While parsing response header 'Status'")?;
+
+            if status > 400 {
+                bail!("Service returned an error response (code: {})", status);
+            }
+        };
+
+        if let Some(file_name) = cli.response_headers_dump_file.as_ref() {
+            let mut hdr_stream = open_output_file(&cli, file_name).await?;
+            let hdr_len = data.len() - body.len();
+            io::copy(&mut &data[..hdr_len], &mut hdr_stream).await?;
+        }
+
+        if cli.response_headers_include {
+            data
+        } else {
+            body
+        }
+    } else {
+        data
+    };
+
+    let mut out_stream: Pin<Box<dyn io::AsyncWrite>> =
+        if let Some(file_name) = cli.real_output_file_name()? {
+            open_output_file(&cli, file_name).await?
+        } else {
+            Box::pin(io::stdout())
+        };
+
+    io::copy(&mut out, &mut out_stream).await?;
+
+    Ok(())
+}
+
+async fn handle_response_stderr(cli: &Cli, data: Vec<u8>) -> Result<()> {
+    let mut err_stream: Pin<Box<dyn io::AsyncWrite>> =
+    if let Some(file_name) = cli.stderr_file_name.as_ref() {
+        open_output_file(&cli, file_name).await?
+    } else {
+        Box::pin(io::stderr())
+    };
+
+    io::copy(&mut data.as_slice(), &mut err_stream).await?;
 
     Ok(())
 }

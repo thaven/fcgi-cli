@@ -9,6 +9,7 @@ edition = "2021"
 anyhow = "1.0.68"
 clap = { version = "4.1.4", features = ["derive"] }
 fastcgi-client = "0.8.0"
+nom = "7.1.3"
 tokio = { version = "1.25.0", features = ["net", "io-std", "rt", "macros", "rt-multi-thread", "fs"] }
 url = "2.3.1"
 
