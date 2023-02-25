@@ -306,6 +306,8 @@ async fn open_output_file(cli: &Cli, file_name: impl AsRef<Path>) -> io::Result<
     Ok(Box::pin(
         OpenOptions::new()
             .write(true)
+            .create(true)
+            .truncate(true)
             .open(cli.resolve_output_path(file_name))
             .await?
     ))
