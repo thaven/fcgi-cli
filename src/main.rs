@@ -63,11 +63,13 @@ struct Cli {
     #[arg(long = "data", group = "grp_data")]
     data: Option<String>,
 
-    /// Set the document root (PATH should be a valid absolute path at the server, no trailing slash)
-    #[arg(long = "root")]
+    /// Set the document root
+    ///
+    /// PATH should be a valid absolute path at the server, without trailing slash.
+    #[arg(long = "root", value_name = "PATH")]
     server_document_root: Option<String>,
 
-    /// Set the SCRIPT_NAME
+    /// Set the SCRIPT_NAME parameter
     #[arg(long = "script")]
     script_name: Option<String>,
 
@@ -76,10 +78,14 @@ struct Cli {
     env_vars: Vec<String>,
 
     /// Pass only excplicitly whitelisted environment variables
+    ///
+    /// Use -e, --pass-env to whitelist an environment variable
     #[arg(long = "no-env")]
     env_clear: bool,
 
-    /// Pass all environment variables unmodified (default behavior is to pass only CGI-defined metavariables and protocol variables)
+    /// Pass all environment variables unmodified
+    ///
+    /// Default behavior is to pass only CGI-defined metavariables and protocol variables.
     #[arg(short = 'E', long = "full-env", conflicts_with = "env_clear")]
     env_full: bool,
 
@@ -114,7 +120,9 @@ struct Cli {
     #[arg(short = 'O', long = "remote-name", requires = "url")]
     output_file_remote_name: bool,
 
-    /// Send output received on the FastCGI STDERR stream to specified file. Error output generated locally will still be written to actual stderr.
+    /// Send output received on the FCGI_STDERR stream to specified file.
+    ///
+    /// Error output generated locally will still be written to actual stderr.
     #[arg(long = "stderr", value_name = "FILE")]
     stderr_file_name: Option<PathBuf>,
 
