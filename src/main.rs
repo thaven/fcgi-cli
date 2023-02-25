@@ -5,6 +5,7 @@ use fastcgi_client::{Params, Client};
 use std::borrow::Cow;
 use std::env;
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use tokio::{
     fs::OpenOptions,
     io,
@@ -207,12 +208,14 @@ impl<'a> ParamsExt<'a> for Params<'a> {
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> ExitCode {
     let cli = Cli::parse();
-    
 
     if let Err(e) = execute(&cli).await {
         eprintln!("{}", e);
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
     }
 }
 
