@@ -230,6 +230,12 @@ impl<'a> ParamsExt<'a> for Params<'a> {
             }
         };
 
+        if let Some(data) = cli.data.as_ref() {
+            if self.get("CONTENT_LENGTH").is_none() {
+                self = self.content_length(data.len());
+            }
+        };
+
         self
     }
 
