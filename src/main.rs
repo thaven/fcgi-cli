@@ -3,7 +3,7 @@ use clap::Parser;
 use fastcgi_client::{Client, Params, Request};
 use headers::parse_headers;
 use std::{
-    borrow::Cow,
+    borrow::{Borrow, Cow},
     env,
     path::{Path, PathBuf},
     pin::Pin,
@@ -275,14 +275,15 @@ async fn execute(cli: &Cli) -> Result<()> {
         .set_from_cli(&cli);
 
     let input_stream = Box::<dyn io::AsyncRead>::into_pin(
-        if let Some(data) = cli.data.as_ref() {
-            Box::new(data.as_bytes())
-        } else {
-            if cli.request_method != "GET" {
-                Box::new(io::stdin())
+        if params.get("CONTENT_LENGTH").is_some() {
+            if let Some(data) = cli.data.as_ref() {
+                check_data_length(&params, data.len())?;
+                Box::new(data.as_bytes())
             } else {
-                Box::new(io::empty())
+                Box::new(io::stdin())
             }
+        } else {
+            Box::new(io::empty())
         }
     );
 
@@ -307,6 +308,30 @@ async fn execute(cli: &Cli) -> Result<()> {
     };
 
     Ok(())
+}
+
+fn check_data_length(params: &Params, data_length: usize) -> Result<()> {
+    if let Some(str_content_length) = params.get("CONTENT_LENGTH") {
+        let content_length: usize = parse_content_length(str_content_length.borrow())?;
+        if data_length < content_length {
+            bail!("Insufficient input. Received {} bytes of data, but expected \
+                at least {} bytes because of explicit CONTENT_LENGTH parameter.",
+                data_length,
+                content_length
+            );
+        };
+    };
+
+    Ok(())
+}
+
+fn parse_content_length(str_content_length: &str) -> Result<usize> {
+    str_content_length
+        .parse()
+        .context(format!(
+            "Failed to parse value of CONTENT_LENGTH. Expected unsigned integer, got \"{}\".",
+            str_content_length
+        ))
 }
 
 async fn open_output_file(cli: &Cli, file_name: impl AsRef<Path>) -> io::Result<Pin<Box<dyn io::AsyncWrite>>> {
