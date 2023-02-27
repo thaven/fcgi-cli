@@ -1,13 +1,14 @@
-use anyhow::{anyhow, Result, Context, bail};
+use anyhow::{anyhow, bail, Context, Result};
 use clap::Parser;
-use fastcgi_client::Request;
-use fastcgi_client::{Params, Client};
+use fastcgi_client::{Client, Params, Request};
 use headers::parse_headers;
-use std::borrow::Cow;
-use std::env;
-use std::path::{Path, PathBuf};
-use std::pin::Pin;
-use std::process::ExitCode;
+use std::{
+    borrow::Cow,
+    env,
+    path::{Path, PathBuf},
+    pin::Pin,
+    process::ExitCode
+};
 use tokio::{
     fs::OpenOptions,
     io,
